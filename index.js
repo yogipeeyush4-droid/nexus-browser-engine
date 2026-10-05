@@ -5,6 +5,7 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const rateLimit = require('express-rate-limit');
 const LRU = require('lru-cache');
 const pino = require('pino');
+const http = require('http');
 
 const LRUCache = LRU.LRUCache || LRU;
 puppeteer.use(StealthPlugin());
@@ -143,10 +144,8 @@ class BrowserPool {
 
         this.browsers.set(id, entry);
 
-        // pages ko pool me daalo
         for (const page of entry.pages) this._givePage({ page, entry });
 
-        // ── Browser Auto-Restart ──
         browser.on('disconnected', () => {
             logger.warn({ browserId: id }, 'Browser disconnected — auto restart');
             this.browsers.delete(id);
@@ -159,13 +158,10 @@ class BrowserPool {
         logger.info({ browserId: id, proxy: proxy ? proxy.replace(/:[^:@]*@/, ':***@') : 'direct' }, 'Browser up ✅');
     }
 
-    // ── Request Interception (bandwidth + speed) ──
     async _setupPage(page) {
         await page.setViewport({ width: 1366, height: 768 });
         await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
         page.setDefaultNavigationTimeout(CONFIG.NAV_TIMEOUT);
-
-        
 
         if (CONFIG.BLOCK_RESOURCES) {
             await page.setRequestInterception(true);
@@ -303,7 +299,7 @@ async function extractResults(page, max) {
 }
 
 // ═══════════════════════════════════════════════════════
-// 8. CORE SEARCH (uses pool + queue)
+// 8. CORE SEARCH
 // ═══════════════════════════════════════════════════════
 async function performSearch(query, maxResults) {
     const { page, entry } = await pool.acquire();
@@ -402,7 +398,6 @@ app.post('/search', async (req, res) => {
     if (!query) return res.status(400).json({ success: false, error: 'Query required' });
     if (query.length > 300) return res.status(400).json({ success: false, error: 'Query too long' });
 
-    // ── CACHE HIT ──
     const key = cacheKey(query, maxResults);
     const cached = cache.get(key);
     if (cached) {
@@ -412,7 +407,6 @@ app.post('/search', async (req, res) => {
 
     logger.info({ query, maxResults, queue: queue.stats() }, 'New search request');
 
-    // ── QUEUE + EXECUTE ──
     const start = Date.now();
     try {
         const result = await queue.add(() => searchWithRetry(query, maxResults));
@@ -442,11 +436,20 @@ process.on('uncaughtException', err => logger.fatal({ err: err.message }, 'Uncau
 process.on('unhandledRejection', err => logger.error({ err: String(err) }, 'Unhandled rejection'));
 
 // ═══════════════════════════════════════════════════════
-// 11. BOOT
+// 11. BOOT & 10-SECOND FAST HEARTBEAT PING
 // ═══════════════════════════════════════════════════════
 (async () => {
     await pool.init();
     app.listen(CONFIG.PORT, () => {
         logger.info({ port: CONFIG.PORT }, `[NEXUS ENGINE] 🚀 http://localhost:${CONFIG.PORT}`);
+        
+        // Fast Heartbeat Ping Script (Har 10 seconds me khud ko ping karega taaki Codespace so na paye)
+        setInterval(() => {
+            http.get(`http://localhost:${CONFIG.PORT}/health`, (res) => {
+                // Background keep-alive ping active
+            }).on('error', (err) => {
+                // Ignore silent errors
+            });
+        }, 10000); // 10000 ms = 10 seconds
     });
 })();
