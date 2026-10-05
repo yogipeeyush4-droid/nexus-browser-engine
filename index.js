@@ -130,7 +130,7 @@ class BrowserPool {
         if (proxy) args.push(`--proxy-server=${proxy}`);
 
         const browser = await puppeteer.launch({
-            headless: 'new', args, ignoreDefaultArgs: ['--enable-automation'],
+            headless: 'true', args, ignoreDefaultArgs: ['--enable-automation'],
         });
         const id = this.nextId++;
         const entry = { id, browser, proxy, pages: new Set() };
@@ -165,11 +165,7 @@ class BrowserPool {
         await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
         page.setDefaultNavigationTimeout(CONFIG.NAV_TIMEOUT);
 
-        await page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => false });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        });
+        
 
         if (CONFIG.BLOCK_RESOURCES) {
             await page.setRequestInterception(true);
